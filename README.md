@@ -1,4 +1,4 @@
-# Documentação da API - Manager Dashboard Backend
+# API Manager Dashboard Backend
 
 Esta API é um backend RESTful desenvolvido com **FastAPI** que atua como um gateway para o **Supabase**. Ela gerencia o cadastro de Cidades, Categorias, Serviços e Usuários, incluindo manipulação de arquivos (imagens) via Supabase Storage.
 
