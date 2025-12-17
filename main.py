@@ -318,25 +318,66 @@ async def delete_category(category_id: int):
         raise HTTPException(500, f"Erro ao deletar categoria: {str(e)}")
 
 # -------- SERVIÇOS --------
-@app.get("/services")
-async def list_services(city_id: Optional[int] = Query(None), category_id: Optional[int] = Query(None)):
+@app.post("/services")
+async def create_service(service: ServiceIn):
     try:
-        filters = {}
-        if city_id:
-            filters["city_id"] = city_id
-        if category_id:
-            filters["category_id"] = category_id
+        # Validação de city_id e category_id
+        city = await supabase_request("GET", table="cities", id=service.city_id)
+        if not city:
+            raise HTTPException(400, "Cidade não encontrada")
         
-        if filters:
-            data = await supabase_request("GET", table="services", filters=filters, 
-                                         select="*,cities(*),categories(*)")
-        else:
-            data = await supabase_request("GET", table="services", 
-                                         select="*,cities(*),categories(*)")
+        category = await supabase_request("GET", table="categories", id=service.category_id)
+        if not category:
+            raise HTTPException(400, "Categoria não encontrada")
         
-        return data or []
+        print(f"📝 Criando serviço: {service.dict()}")
+        
+        data = await supabase_request("POST", table="services", data=service.dict())
+        
+        # Tenta obter o ID do serviço criado de diferentes formas
+        service_id = None
+        
+        if isinstance(data, list) and len(data) > 0:
+            # Se a resposta for uma lista com dados
+            service_data = data[0]
+            if isinstance(service_data, dict) and "id" in service_data:
+                service_id = service_data["id"]
+                print(f"✅ Serviço criado com ID: {service_id}")
+                return service_data
+            else:
+                # Se não tem ID na resposta, busca o último serviço criado
+                print("⚠️  Resposta não contém ID, buscando último serviço...")
+                all_services = await supabase_request("GET", table="services", 
+                                                     select="id,name,created_at", 
+                                                     filters={"name": service.name})
+                if all_services and len(all_services) > 0:
+                    # Ordena por created_at (mais recente primeiro)
+                    sorted_services = sorted(all_services, 
+                                           key=lambda x: x.get('created_at', ''), 
+                                           reverse=True)
+                    return sorted_services[0]
+        
+        # Se chegou aqui, algo deu errado mas o serviço pode ter sido criado
+        print("⚠️  Não foi possível obter dados do serviço criado, retornando dados de entrada")
+        return {
+            "id": None,
+            "name": service.name,
+            "description": service.description,
+            "city_id": service.city_id,
+            "category_id": service.category_id,
+            "message": "Serviço criado (verifique no banco de dados)"
+        }
+        
     except Exception as e:
-        raise HTTPException(500, f"Erro ao listar serviços: {str(e)}")
+        error_msg = str(e)
+        print(f"❌ Erro ao criar serviço: {error_msg}")
+        
+        # Se o erro for sobre JSON, mas o serviço foi criado
+        if "JSON" in error_msg or "decode" in error_msg or "201" in error_msg:
+            raise HTTPException(500, 
+                f"Serviço pode ter sido criado (erro na resposta do Supabase). Recarregue a página para verificar.")
+        else:
+            raise HTTPException(500, f"Erro ao criar serviço: {error_msg}")
 
 @app.get("/services/{service_id}")
 async def get_service(service_id: int):
