@@ -11,20 +11,24 @@ load_dotenv()
 
 app = FastAPI()
 
-# Configurar CORS para produção
+# Configurar CORS CORRETAMENTE
+# Adicione TODAS as origens que podem acessar sua API
 origins = [
     "http://localhost:3000",
     "http://localhost:8080",
     "http://127.0.0.1:8080",
-    "https://*.netlify.app",  # Qualquer subdomínio Netlify
+    "http://localhost:8000",
+    "https://alexdoidopormoney.netlify.app/",  # SEU SITE NETLIFY
+    "https://*.netlify.app",                  # Qualquer subdomínio Netlify
+    "https://api-supabase-back.onrender.com/", # Seu próprio backend
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Permite todos os métodos (GET, POST, PUT, DELETE, etc.)
+    allow_headers=["*"],  # Permite todos os headers
 )
 
 # Configurações do Supabase
@@ -34,7 +38,6 @@ SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 # Verificar se variáveis de ambiente estão definidas
 if not SUPABASE_URL or not SUPABASE_KEY:
     print("⚠️  AVISO: Variáveis de ambiente SUPABASE_URL ou SUPABASE_KEY não definidas!")
-    print("⚠️  Certifique-se de configurar no Render.com")
 
 # Headers para todas as requisições
 HEADERS = {
@@ -121,7 +124,7 @@ async def upload_to_storage(bucket: str, filename: str, file_content: bytes):
         except Exception as e:
             raise Exception(f"Erro ao conectar com Supabase Storage: {str(e)}")
 
-# -------- CIDADES --------
+# -------- ROTAS --------
 @app.get("/cities")
 async def list_cities():
     data = await supabase_request("GET", "cities")
@@ -135,7 +138,6 @@ async def create_city(city: CityIn):
     except Exception as e:
         raise HTTPException(500, f"Erro ao criar cidade: {str(e)}")
 
-# -------- CATEGORIAS --------
 @app.get("/categories")
 async def list_categories():
     data = await supabase_request("GET", "categories")
@@ -149,7 +151,6 @@ async def create_category(category: CategoryIn):
     except Exception as e:
         raise HTTPException(500, f"Erro ao criar categoria: {str(e)}")
 
-# -------- SERVIÇOS --------
 @app.get("/services")
 async def list_services():
     try:
@@ -169,26 +170,20 @@ async def create_service(service: ServiceIn):
 @app.post("/services/{service_id}/logo")
 async def upload_service_logo(service_id: int, file: UploadFile = File(...)):
     try:
-        # Verifica tamanho do arquivo (max 5MB)
         content = await file.read()
         if len(content) > 5 * 1024 * 1024:
             raise HTTPException(400, "Arquivo muito grande (max 5MB)")
         
-        # Gera nome único para o arquivo
         file_extension = file.filename.split('.')[-1] if '.' in file.filename else 'png'
         unique_filename = f"service_{service_id}_{uuid.uuid4()}.{file_extension}"
         
-        # Faz upload para o Supabase Storage
         logo_url = await upload_to_storage("logos", unique_filename, content)
-        
-        # Atualiza o serviço com a URL do logo
         await supabase_request("PATCH", "services", {"logo_url": logo_url}, {"id": service_id})
         
         return {"logo_url": logo_url, "message": "Logo enviado com sucesso"}
     except Exception as e:
         raise HTTPException(500, f"Erro ao fazer upload: {str(e)}")
 
-# -------- USUÁRIOS --------
 @app.get("/users")
 async def list_users():
     data = await supabase_request("GET", "users")
@@ -205,43 +200,29 @@ async def create_user(user: UserIn):
 @app.post("/users/{user_id}/avatar")
 async def upload_user_avatar(user_id: int, file: UploadFile = File(...)):
     try:
-        # Verifica tamanho do arquivo (max 5MB)
         content = await file.read()
         if len(content) > 5 * 1024 * 1024:
             raise HTTPException(400, "Arquivo muito grande (max 5MB)")
         
-        # Gera nome único para o arquivo
         file_extension = file.filename.split('.')[-1] if '.' in file.filename else 'png'
         unique_filename = f"user_{user_id}_{uuid.uuid4()}.{file_extension}"
         
-        # Faz upload para o Supabase Storage
         avatar_url = await upload_to_storage("avatars", unique_filename, content)
-        
-        # Atualiza o usuário com a URL do avatar
         await supabase_request("PATCH", "users", {"avatar_url": avatar_url}, {"id": user_id})
         
         return {"avatar_url": avatar_url, "message": "Avatar enviado com sucesso"}
     except Exception as e:
         raise HTTPException(500, f"Erro ao fazer upload: {str(e)}")
 
-# -------- ROTA RAIZ --------
 @app.get("/")
 async def root():
     return {
         "message": "API Manager Dashboard Backend",
         "status": "online",
-        "endpoints": {
-            "GET /cities": "Listar cidades",
-            "POST /cities": "Criar cidade",
-            "GET /categories": "Listar categorias",
-            "POST /categories": "Criar categoria",
-            "GET /services": "Listar serviços",
-            "POST /services": "Criar serviço",
-            "POST /services/{id}/logo": "Upload logo do serviço",
-            "GET /users": "Listar usuários",
-            "POST /users": "Criar usuário",
-            "POST /users/{id}/avatar": "Upload avatar do usuário"
-        }
+        "cors_allowed_origins": [
+            "https://alexdoidopormoney.netlify.app",
+            "https://*.netlify.app"
+        ]
     }
 
 if __name__ == "__main__":
