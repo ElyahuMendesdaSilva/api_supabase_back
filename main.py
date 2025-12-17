@@ -100,40 +100,72 @@ async def supabase_request(method: str, endpoint: str = None, table: str = None,
     print(f"🌐 Requisição Supabase: {method} {url}")
     
     async with aiohttp.ClientSession() as session:
-        kwargs = {"headers": HEADERS}
+        # Cria cópia dos headers e adiciona cabeçalho Prefer para operações de escrita
+        headers = HEADERS.copy()
+        
+        # Para POST, PATCH e DELETE, adiciona cabeçalho para retornar os dados
+        if method in ["POST", "PATCH"]:
+            headers["Prefer"] = "return=representation"
+        elif method == "DELETE":
+            headers["Prefer"] = "return=minimal"
+        
+        kwargs = {"headers": headers}
         if data:
             kwargs["json"] = data
         
         try:
             if method == "GET":
                 async with session.get(url, **kwargs) as response:
-                    result = await response.json()
                     print(f"✅ GET Response: {response.status}")
-                    return result
+                    if response.status == 200:
+                        return await response.json()
+                    else:
+                        error_text = await response.text()
+                        raise Exception(f"GET falhou: {response.status} - {error_text}")
                     
             elif method == "POST":
                 async with session.post(url, **kwargs) as response:
-                    result = await response.json()
                     print(f"✅ POST Response: {response.status}")
-                    return result
+                    # Para POST, pode retornar 201 Created
+                    if response.status in [200, 201]:
+                        # Tenta parsear JSON, se falhar, retorna texto vazio
+                        try:
+                            return await response.json()
+                        except:
+                            # Se não houver conteúdo JSON, retorna um objeto com o status
+                            return [{"id": None, "status": "created", "message": "Recurso criado com sucesso"}]
+                    else:
+                        error_text = await response.text()
+                        raise Exception(f"POST falhou: {response.status} - {error_text}")
                     
             elif method == "PATCH":
                 async with session.patch(url, **kwargs) as response:
-                    result = await response.json()
                     print(f"✅ PATCH Response: {response.status}")
-                    return result
+                    if response.status == 200:
+                        return await response.json()
+                    else:
+                        error_text = await response.text()
+                        raise Exception(f"PATCH falhou: {response.status} - {error_text}")
                     
             elif method == "DELETE":
                 async with session.delete(url, **kwargs) as response:
                     print(f"✅ DELETE Response: {response.status}")
-                    if response.status == 204:
+                    if response.status in [200, 204]:
                         return {"message": "Deleted successfully"}
-                    return await response.text()
+                    else:
+                        error_text = await response.text()
+                        raise Exception(f"DELETE falhou: {response.status} - {error_text}")
                     
         except Exception as e:
             print(f"❌ Erro na requisição: {str(e)}")
+            # Se for erro de JSON, trata especificamente
+            if "JSON" in str(e) or "decode" in str(e).lower():
+                # Para POST, se deu erro de JSON mas o status era 201, assume que criou
+                if method == "POST":
+                    print("⚠️  Erro de parse JSON em POST, mas provavelmente criou o recurso")
+                    return [{"id": None, "status": "created_no_json"}]
             raise Exception(f"Erro na requisição Supabase: {str(e)}")
-
+        
 async def upload_to_storage(bucket: str, filename: str, file_content: bytes):
     """Faz upload de arquivo para o Supabase Storage"""
     url = f"{SUPABASE_URL}/storage/v1/object/{bucket}/{filename}"
@@ -318,66 +350,25 @@ async def delete_category(category_id: int):
         raise HTTPException(500, f"Erro ao deletar categoria: {str(e)}")
 
 # -------- SERVIÇOS --------
-@app.post("/services")
-async def create_service(service: ServiceIn):
+@app.get("/services")
+async def list_services(city_id: Optional[int] = Query(None), category_id: Optional[int] = Query(None)):
     try:
-        # Validação de city_id e category_id
-        city = await supabase_request("GET", table="cities", id=service.city_id)
-        if not city:
-            raise HTTPException(400, "Cidade não encontrada")
+        filters = {}
+        if city_id:
+            filters["city_id"] = city_id
+        if category_id:
+            filters["category_id"] = category_id
         
-        category = await supabase_request("GET", table="categories", id=service.category_id)
-        if not category:
-            raise HTTPException(400, "Categoria não encontrada")
-        
-        print(f"📝 Criando serviço: {service.dict()}")
-        
-        data = await supabase_request("POST", table="services", data=service.dict())
-        
-        # Tenta obter o ID do serviço criado de diferentes formas
-        service_id = None
-        
-        if isinstance(data, list) and len(data) > 0:
-            # Se a resposta for uma lista com dados
-            service_data = data[0]
-            if isinstance(service_data, dict) and "id" in service_data:
-                service_id = service_data["id"]
-                print(f"✅ Serviço criado com ID: {service_id}")
-                return service_data
-            else:
-                # Se não tem ID na resposta, busca o último serviço criado
-                print("⚠️  Resposta não contém ID, buscando último serviço...")
-                all_services = await supabase_request("GET", table="services", 
-                                                     select="id,name,created_at", 
-                                                     filters={"name": service.name})
-                if all_services and len(all_services) > 0:
-                    # Ordena por created_at (mais recente primeiro)
-                    sorted_services = sorted(all_services, 
-                                           key=lambda x: x.get('created_at', ''), 
-                                           reverse=True)
-                    return sorted_services[0]
-        
-        # Se chegou aqui, algo deu errado mas o serviço pode ter sido criado
-        print("⚠️  Não foi possível obter dados do serviço criado, retornando dados de entrada")
-        return {
-            "id": None,
-            "name": service.name,
-            "description": service.description,
-            "city_id": service.city_id,
-            "category_id": service.category_id,
-            "message": "Serviço criado (verifique no banco de dados)"
-        }
-        
-    except Exception as e:
-        error_msg = str(e)
-        print(f"❌ Erro ao criar serviço: {error_msg}")
-        
-        # Se o erro for sobre JSON, mas o serviço foi criado
-        if "JSON" in error_msg or "decode" in error_msg or "201" in error_msg:
-            raise HTTPException(500, 
-                f"Serviço pode ter sido criado (erro na resposta do Supabase). Recarregue a página para verificar.")
+        if filters:
+            data = await supabase_request("GET", table="services", filters=filters, 
+                                         select="*,cities(*),categories(*)")
         else:
-            raise HTTPException(500, f"Erro ao criar serviço: {error_msg}")
+            data = await supabase_request("GET", table="services", 
+                                         select="*,cities(*),categories(*)")
+        
+        return data or []
+    except Exception as e:
+        raise HTTPException(500, f"Erro ao listar serviços: {str(e)}")
 
 @app.get("/services/{service_id}")
 async def get_service(service_id: int):
