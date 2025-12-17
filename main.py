@@ -23,12 +23,13 @@ origins = [
     "https://api-supabase-back.onrender.com/", # Seu próprio backend
 ]
 
+# NO LUGAR DA CONFIGURAÇÃO ATUAL DE CORS, USE:
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],  # Permite TODAS as origens (apenas para teste)
     allow_credentials=True,
-    allow_methods=["*"],  # Permite todos os métodos (GET, POST, PUT, DELETE, etc.)
-    allow_headers=["*"],  # Permite todos os headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Configurações do Supabase
@@ -229,3 +230,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
